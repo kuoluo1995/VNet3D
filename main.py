@@ -18,7 +18,7 @@ label_channels = ['segmentation']
 
 spacing = [1.5, 1.5, 9]
 
-init_filter = 16
+init_filter = 32
 classes = [0, 1]
 model_dir = Path('_checkpoints')
 logs_path = Path('tensorboard_logs') / 'vnet'

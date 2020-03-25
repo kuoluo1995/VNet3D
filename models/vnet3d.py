@@ -77,9 +77,9 @@ def _get_metrics(pred_op, target, num_classes):
                                                    name="false_positives_" + str(i))
             fn, fn_op = tf.metrics.false_negatives(label_one_hot[:, :, :, :, i], pred_one_hot[:, :, :, :, i],
                                                    name="false_negatives_" + str(i))
-            with tf.name_scope('sensitivity'):  # 召回率
+            with tf.name_scope('sensitivity'):
                 sensitivity_op = tf.divide(tf.cast(tp_op, tf.float32), tf.cast(tf.add(tp_op, fn_op), tf.float32))
-            with tf.name_scope('specificity'):  # 准确率
+            with tf.name_scope('specificity'):
                 specificity_op = tf.divide(tf.cast(tn_op, tf.float32), tf.cast(tf.add(tn_op, fp_op), tf.float32))
             with tf.name_scope('dice'):
                 dice_op = 2. * tp_op / (2. * tp_op + fp_op + fn_op)
@@ -107,7 +107,7 @@ class Vnet3dModule(object):
                       n_classes=self.num_classes)
         self.pred_op = _logits2predict(logits)
         self.softmax_op = _logits2softmax(logits)
-        self.loss_op = _get_loss(logits, self.label_ph, num_classes)
+        self.loss_op = _get_loss(self.softmax_op, self.label_ph, num_classes)
         self.accuracy_op, self.sensitivity_op, self.specificity_op, self.dice_op = _get_metrics(self.pred_op,
                                                                                                 self.label_ph,
                                                                                                 self.num_classes)
