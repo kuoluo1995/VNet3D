@@ -5,7 +5,6 @@ import math
 import nibabel as nib
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt  # plt 用于显示图片
 from dataset.nf_dataloader import get_patch_list, get_patch_all
 from models.layer import vnet, prelu, grayscale_to_rainbow
 

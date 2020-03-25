@@ -33,7 +33,7 @@ num_epoch = 99999
 
 def train():
     dataset = get_nii_list('/home/yf/PythonProject/MIS/data/NF/nii_NF')
-    # dataset = get_nii2_list('E:/Dataset/Neurofibromatosis/source/label')
+    # dataset = get_nii2_list('E:/Dataset/Neurofibromatosis/source/test')
     dataset = list(dataset.values())
     train_dataset_size = len(dataset) * 9 // 10
     train_dataset = dataset[:train_dataset_size]

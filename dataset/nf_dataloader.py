@@ -157,7 +157,7 @@ def nift_generator(data_list, spacing, batch_size, height, width, depth, input_c
         with tf.name_scope('{}_pipeline'.format('train' if is_train else 'test')):
             if is_train:
                 data_transforms = [
-                    NiftiDataset3D.ManualNormalization(0, 300),
+                    NiftiDataset3D.ManualNormalization(0, 900),
                     NiftiDataset3D.RandomFlip((True, True, True)),
                     NiftiDataset3D.Resample(spacing),
                     NiftiDataset3D.Padding((height, width, depth)),
@@ -166,7 +166,7 @@ def nift_generator(data_list, spacing, batch_size, height, width, depth, input_c
                 ]
             else:
                 data_transforms = [
-                    NiftiDataset3D.ManualNormalization(0, 300),
+                    NiftiDataset3D.ManualNormalization(0, 900),
                     NiftiDataset3D.Resample(spacing),
                     NiftiDataset3D.Padding((height, width, depth)),
                     NiftiDataset3D.RandomCrop((height, width, depth), is_train, drop_ratio, min_pixel),
