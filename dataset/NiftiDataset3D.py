@@ -130,6 +130,73 @@ class Normalization:
         return {'image': image, 'label': label}
 
 
+class StatisticalNormalization:
+    """
+    Normalize an image by mapping intensity with intensity distribution
+    """
+
+    def __init__(self, sigma, pre_norm=False):
+        self.name = 'StatisticalNormalization'
+        assert isinstance(sigma, float)
+        self.sigma = sigma
+        self.pre_norm = pre_norm
+
+    def __call__(self, sample):
+        image, label = sample['image'], sample['label']
+
+        for image_channel in range(len(image)):
+            if self.pre_norm:
+                normalFilter = sitk.NormalizeImageFilter()
+                image[image_channel] = normalFilter.Execute(image[image_channel])
+
+            statisticsFilter = sitk.StatisticsImageFilter()
+            statisticsFilter.Execute(image[image_channel])
+
+            intensityWindowingFilter = sitk.IntensityWindowingImageFilter()
+            intensityWindowingFilter.SetOutputMaximum(255)
+            intensityWindowingFilter.SetOutputMinimum(0)
+            intensityWindowingFilter.SetWindowMaximum(
+                statisticsFilter.GetMean() + self.sigma * statisticsFilter.GetSigma())
+            intensityWindowingFilter.SetWindowMinimum(
+                statisticsFilter.GetMean() - self.sigma * statisticsFilter.GetSigma())
+
+            image[image_channel] = intensityWindowingFilter.Execute(image[image_channel])
+
+        return {'image': image, 'label': label}
+
+
+class ExtremumNormalization:
+    """
+    Normalize an image by mapping intensity with intensity maximum and minimum
+    """
+
+    def __init__(self, percent=0.05):
+        self.name = 'ExtremumNormalization'
+        assert isinstance(percent, float)
+        self.percent = percent
+
+    def __call__(self, sample):
+        image, label = sample['image'], sample['label']
+
+        for image_channel in range(len(image)):
+            statisticsFilter = sitk.StatisticsImageFilter()
+            statisticsFilter.Execute(image[image_channel])
+
+            intensityWindowingFilter = sitk.IntensityWindowingImageFilter()
+            intensityWindowingFilter.SetOutputMaximum(255)
+            intensityWindowingFilter.SetOutputMinimum(0)
+            windowMax = (statisticsFilter.GetMaximum() - statisticsFilter.GetMinimum()) * (1 - self.percent) + \
+                        statisticsFilter.GetMinimum()
+            windowMin = (statisticsFilter.GetMaximum() - statisticsFilter.GetMinimum()) * self.percent + \
+                        statisticsFilter.GetMinimum()
+            intensityWindowingFilter.SetWindowMaximum(windowMax)
+            intensityWindowingFilter.SetWindowMinimum(windowMin)
+
+            image[image_channel] = intensityWindowingFilter.Execute(image[image_channel])
+
+        return {'image': image, 'label': label}
+
+
 class ManualNormalization:
     def __init__(self, min_window, max_window):
         self.name = 'ManualNormalization'
@@ -184,6 +251,21 @@ class RandomFlip(object):
         for image_channel in range(len(image)):
             image[image_channel] = flipFilter.Execute(image[image_channel])
         label = flipFilter.Execute(label)
+
+        return {'image': image, 'label': label}
+
+
+class Invert:
+    """Invert the image intensity from 0-255
+    """
+
+    def __init__(self):
+        self.name = 'Invert'
+
+    def __call__(self, sample):
+        invertFilter = sitk.InvertIntensityImageFilter()
+        image = invertFilter.Execute(sample['image'], 255)
+        label = sample['label']
 
         return {'image': image, 'label': label}
 
@@ -340,3 +422,49 @@ class RandomNoise(object):
             image[_c] = self.noiseFilter.Execute(image[_c])
 
         return {'image': image, 'label': label}
+
+
+class BSplineDeformation:
+    """
+    Image deformation with a sparse set of control points to control a free form deformation.
+    Details can be found here:
+    https://simpleitk.github.io/SPIE2018_COURSE/spatial_transformations.pdf
+    https://itk.org/Doxygen/html/classitk_1_1BSplineTransform.html
+
+    Args:
+        randomness (int,float): BSpline deformation scaling factor, default is 10.
+    """
+
+    def __init__(self, randomness=10):
+        self.name = 'BSpline Deformation'
+
+        assert isinstance(randomness, (int, float))
+        if randomness > 0:
+            self.randomness = randomness
+        else:
+            raise RuntimeError('Randomness should be non zero values')
+
+    def __call__(self, sample):
+        image, label = sample['image'], sample['label']
+        spline_order = 3
+        domain_physical_dimensions = [image.GetSize()[0] * image.GetSpacing()[0],
+                                      image.GetSize()[1] * image.GetSpacing()[1],
+                                      image.GetSize()[2] * image.GetSpacing()[2]]
+
+        bspline = sitk.BSplineTransform(3, spline_order)
+        bspline.SetTransformDomainOrigin(image.GetOrigin())
+        bspline.SetTransformDomainDirection(image.GetDirection())
+        bspline.SetTransformDomainPhysicalDimensions(domain_physical_dimensions)
+        bspline.SetTransformDomainMeshSize((10, 10, 10))
+
+        # Random displacement of the control points.
+        originalControlPointDisplacements = np.random.random(len(bspline.GetParameters())) * self.randomness
+        bspline.SetParameters(originalControlPointDisplacements)
+
+        image = sitk.Resample(image, bspline)
+        label = sitk.Resample(label, bspline)
+        return {'image': image, 'label': label}
+
+    def NormalOffset(self, size, sigma):
+        s = np.random.normal(0, size * sigma / 2, 100)  # 100 sample is good enough
+        return int(round(random.choice(s)))

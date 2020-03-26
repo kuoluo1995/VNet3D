@@ -3,7 +3,7 @@ import nibabel as nib
 import numpy as np
 from pathlib import Path
 
-from dataset.nf_tf_dataloader import get_nii2_list
+from dataloaders.nf_tf_dataloader import get_nii2_list
 
 
 def _get_data_patch(x, y, depth, height, width, channels, is_random):

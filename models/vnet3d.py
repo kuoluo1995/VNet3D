@@ -3,7 +3,12 @@ import shutil
 
 import math
 import tensorflow as tf
-from models.layer import vnet, prelu, grayscale_to_rainbow, logits2predict, logits2softmax, get_loss, get_metrics
+
+from models.activation_function import get_activation_fn
+from models.layer import grayscale_to_rainbow, logits2predict, logits2softmax, get_num_channels, conv_bn_relu_drop, \
+    down_conv_bn_relu, up_conv_bn_relu, concat_conv_bn_relu_drop, convolution
+from models.loss_function import get_loss_op
+from models.metrics_function import get_metrics
 
 net_configs = {
     'encoder_1': {'conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 1, 'resnet': True},
@@ -30,9 +35,45 @@ net_configs = {
 }
 
 
-class Vnet3dModule(object):
+def get_logits(x, init_channel, net_configs, relu=None, norm=None, is_train=True, drop=0, n_classes=2):
+    # drop = drop if is_train else 0.0
+    with tf.variable_scope('vnet'):
+        with tf.variable_scope('input_layer'):
+            x = tf.tile(x, [1, 1, 1, 1, init_channel])
+            x = tf.layers.batch_normalization(x, momentum=0.99, epsilon=0.001, center=True, scale=True,
+                                              training=is_train)
+        features = {}
+        for level_name, items in net_configs.items():
+            with tf.variable_scope(level_name):
+                for sub_name, _configs in items.items():
+                    n_channels = get_num_channels(x)
+                    if 'conv_block' == sub_name:
+                        filter_ = _configs['kernel'] + [n_channels, n_channels]
+                        x = conv_bn_relu_drop(x, filter_, _configs['strides'], relu, norm, is_train, drop,
+                                              _configs['replace'], _configs['resnet'])
+                        features[level_name] = x
+                    if 'down_block' == sub_name:
+                        filter_ = _configs['kernel'] + [n_channels, n_channels * 2]
+                        x = down_conv_bn_relu(x, filter_, _configs['strides'], relu, norm, is_train)
+                    if 'up_block' == sub_name:
+                        filter_ = _configs['kernel'] + [n_channels // 2, n_channels]
+                        _shape = tf.shape(features[_configs['output_shape']])
+                        x = up_conv_bn_relu(x, filter_, _configs['strides'], _shape, relu, norm, is_train)
+                    if 'concat_conv_block' == sub_name:
+                        filter_ = _configs['kernel'] + [n_channels, n_channels]
+                        feature = features[_configs['feature']]
+                        x = concat_conv_bn_relu_drop(x, feature, filter_, _configs['strides'], relu, norm, is_train,
+                                                     drop, _configs['replace'], _configs['resnet'])
+        with tf.variable_scope('output_layer'):
+            x = convolution(x, [1, 1, 1, init_channel, n_classes])
+            x = tf.layers.batch_normalization(x, momentum=0.99, epsilon=0.001, center=True, scale=True,
+                                              training=is_train)
+        return x
+
+
+class Vnet3dModule:
     def __init__(self, batch_size, depth, height, width, channels, init_filter, num_classes, drop=0, relu='prelu',
-                 loss_name="dice coefficient"):
+                 loss_name="weighted_sorensen"):
         self.batch_size = batch_size
         self.depth = depth
         self.height = height
@@ -47,11 +88,13 @@ class Vnet3dModule(object):
                                        name='label')
         self.is_train = tf.placeholder(tf.bool, name='is_train')
         self.drop_ph = tf.placeholder(tf.float32, name='drop')
-        logits = vnet(self.image_ph, init_filter, net_configs, relu=eval(relu), is_train=self.is_train,
-                      drop=self.drop_ph, n_classes=self.num_classes)
+        self.relu = get_activation_fn(relu)
+        logits = get_logits(self.image_ph, init_filter, net_configs, relu=self.relu, is_train=self.is_train,
+                            drop=self.drop_ph, n_classes=self.num_classes)
         self.pred_op = logits2predict(logits)
         self.softmax_op = logits2softmax(logits)
-        self.loss_op = get_loss(self.softmax_op, self.label_ph, num_classes)
+        self.loss_op = get_loss_op(loss_name, logits_=logits, softmax_=self.softmax_op, labels=self.label_ph,
+                                   num_classes=num_classes)
         self.accuracy_op, self.sensitivity_op, self.specificity_op, self.dice_op = get_metrics(self.pred_op,
                                                                                                self.label_ph,
                                                                                                self.num_classes)
@@ -66,20 +109,20 @@ class Vnet3dModule(object):
         for _b in range(self.batch_size):
             for _c in range(self.channels):
                 with tf.name_scope('image_log'):
-                    image_log = tf.transpose(tf.cast(self.image_ph[_b:_b + 1, :, :, :, _c] * 255, dtype=tf.uint8),
+                    image_log = tf.transpose(tf.cast(self.image_ph[_b:_b + 1, ..., _c] * 255, dtype=tf.uint8),
                                              transpose)
                 image_summary.append(tf.summary.image('image_b{}_c{}'.format(_b, _c), image_log, max_outputs=depth))
                 with tf.name_scope('softmax_log'):
-                    softmax_log = grayscale_to_rainbow(tf.transpose(self.softmax_op[_b:_b + 1, :, :, :, _c], transpose))
+                    softmax_log = grayscale_to_rainbow(tf.transpose(self.softmax_op[_b:_b + 1, ..., _c], transpose))
                     softmax_log = tf.cast(softmax_log * 255, dtype=tf.uint8)
                 image_summary.append(tf.summary.image("softmax_b{}_c{}".format(_b, _c), softmax_log, max_outputs=depth))
             with tf.name_scope('label_log'):
-                label_log = tf.cast(self.label_ph[_b:_b + 1, :, :, :, 0] * math.floor(255 / (self.num_classes - 1)),
+                label_log = tf.cast(self.label_ph[_b:_b + 1, ..., 0] * math.floor(255 / (self.num_classes - 1)),
                                     dtype=tf.uint8)
                 label_log = tf.transpose(label_log, transpose)
             image_summary.append(tf.summary.image('label_b{}'.format(_b), label_log, max_outputs=depth))
             with tf.name_scope('pred_log'):
-                pred_log = tf.cast(self.pred_op[_b:_b + 1, :, :, :] * math.floor(255 / (self.num_classes - 1)),
+                pred_log = tf.cast(self.pred_op[_b:_b + 1, ...] * math.floor(255 / (self.num_classes - 1)),
                                    dtype=tf.uint8)
                 pred_log = tf.transpose(pred_log, transpose)
             image_summary.append(tf.summary.image('pred_b{}'.format(_b), pred_log, max_outputs=depth))
@@ -127,10 +170,10 @@ class Vnet3dModule(object):
         else:
             if model_dir.exists():
                 shutil.rmtree(str(model_dir))
-            model_dir.mkdir(parents=True, exist_ok=True)
             if logs_path.exists():
                 shutil.rmtree(str(logs_path))
-            logs_path.mkdir(parents=True, exist_ok=True)
+        model_dir.mkdir(parents=True, exist_ok=True)
+        logs_path.mkdir(parents=True, exist_ok=True)
         # summary writer for tensorboard
         summary_writer = tf.summary.FileWriter(str(logs_path), graph=tf.get_default_graph())
 
@@ -155,7 +198,7 @@ class Vnet3dModule(object):
                 train_sensitivity += _sensitivity
                 train_specificity += _specificity
                 train_loss += _loss
-                if _dice > best_accuracy:
+                if _dice >= best_accuracy:
                     best_accuracy, best_image, best_label = _dice, _image, _label
             print("{}: Training of epoch {} complete, loss:{},ac:{},dice:{}".format(datetime.datetime.now(), epoch + 1,
                                                                                     train_loss / train_steps,
@@ -203,73 +246,5 @@ class Vnet3dModule(object):
             self.global_epoch_inc.op.run()
         summary_writer.close()
 
-    # def predict_patch(self, eval_generator, model_path, image_path, eval_steps=30):
-    #     init = tf.global_variables_initializer()
-    #     saver = tf.train.Saver(max_to_keep=3)
-    #     sess = tf.InteractiveSession(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False))
-    #     sess.run(init)
-    #     self.restore_training(model_path, saver, sess)
-    #     depth = self.depth
-    #     height = self.height
-    #     width = self.width
-    #     for step in range(eval_steps):
-    #         x, y, len_depth, len_height, len_width, pad_depth, pad_height, pad_width, image_fold, _x, _y = next(
-    #             eval_generator)
-    #         patch_xs, patch_ys = get_patch_list(x, y, len_depth, len_height, len_width, depth, height,
-    #                                             width)
-    #         patch_pres = np.zeros((len_depth * depth, len_height * height, len_width * width))
-    #         for _d_i in range(len_depth):
-    #             for _h_i in range(len_height):
-    #                 for _w_i in range(len_width):
-    #                     accuracy, cost, p = sess.run([self.accuracy, self.loss_op, self.pred_op],
-    #                                                  feed_dict={self.image_ph: np.array([patch_xs[_d_i][_h_i][_w_i]]),
-    #                                                             self.label_ph: np.array([patch_ys[_d_i][_h_i][_w_i]]),
-    #                                                             self.is_train: 0, self.drop: 1})
-    #                     patch_pres[_d_i * depth:(_d_i + 1) * depth,
-    #                     _h_i * height:(_h_i + 1) * height,
-    #                     _w_i * width:(_w_i + 1) * width] = p[0, :, :, :, 0]
-    #         patch_pres = patch_pres[:-pad_depth, :-pad_height, :-pad_width]
-    #         (image_path / image_fold).mkdir(parents=True, exist_ok=True)
-    #         patch_pres = self._predict2nii(_y.affine, patch_pres, (2, 1, 0))
-    #         nib.save(patch_pres, str(image_path / image_fold / 'prediction.nii'))
-    #         nib.save(_x, str(image_path / image_fold / 'volume.nii'))
-    #         nib.save(_y, str(image_path / image_fold / 'label.nii'))
-    #         print('{}/{}'.format(step, eval_steps))
-
-    # def predict_all(self, eval_generator, model_path, image_path, eval_steps=30):
-    #     init = tf.global_variables_initializer()
-    #     saver = tf.train.Saver(max_to_keep=3)
-    #     sess = tf.InteractiveSession(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False))
-    #     sess.run(init)
-    #     self.restore_training(model_path, saver, sess)
-    #     for step in range(eval_steps):
-    #         x, y, num_slice, len_height, len_width, pad_height, pad_width, image_fold, _x, _y = next(eval_generator)
-    #         patch_xs, patch_ys = get_patch_all(x, y, self.depth)
-    #         _accuracy, _cost, batch_preds = sess.run([self.accuracy, self.loss_op, self.pred_op],
-    #                                                  feed_dict={self.image_ph: np.array([patch_xs]),
-    #                                                             self.label_ph: np.array([patch_ys]), self.is_train: 0,
-    #                                                             self.drop: 1})
-    #         patch_pres = batch_preds[0, :, :, :, :]
-    #         patch_pres = self._predict2nii(_y.affine, patch_pres, (2, 1, 0))
-    #         nib.save(patch_pres, image_path + '/' + image_fold + '/prediction.nii')
-    #         nib.save(_x, image_path + '/' + image_fold + '/volume.nii')
-    #         nib.save(_y, image_path + '/' + image_fold + '/label.nii')
-    #         print('{}/{}'.format(step, eval_steps))
-    #
-    # def _predict2nii(self, _affine, _nii, _transpose):
-    #     patch_pres = np.transpose(_nii, _transpose)
-    #     patch_pres = nib.Nifti1Image(patch_pres, _affine)
-    #     return patch_pres
-    #
-    # def restore_training(self, model_path, saver, sess):
-    #     print("\nReading checkpoints...")
-    #     ckpt = tf.train.get_checkpoint_state(model_path)
-    #     if ckpt and ckpt.model_checkpoint_path:
-    #         print('Checkpoint file: {}'.format(ckpt.model_checkpoint_path))
-    #         saver.restore(sess, ckpt.model_checkpoint_path)
-    #         n_epoch = int(ckpt.model_checkpoint_path.split('/')[-1].split('-')[-1])
-    #         print('Loading success, global training epoch is: {}\n'.format(n_epoch))
-    #         return n_epoch
-    #     else:
-    #         print('No checkpoint file found.\n')
-    #         return
+    def predict(self, sess, test_generator, model_dir, eval_steps=30):
+        pass
