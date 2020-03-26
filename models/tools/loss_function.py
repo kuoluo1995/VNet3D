@@ -2,7 +2,7 @@ import sys
 import numpy as np
 import tensorflow as tf
 
-from models.layer import get_spatial_rank
+from models.tools.layer import get_spatial_rank
 
 
 def get_loss_op(loss_name, logits_, softmax_, labels, num_classes, **kwargs):

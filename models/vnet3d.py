@@ -4,11 +4,11 @@ import shutil
 import math
 import tensorflow as tf
 
-from models.activation_function import get_activation_fn
-from models.layer import grayscale_to_rainbow, logits2predict, logits2softmax, get_num_channels, conv_bn_relu_drop, \
+from models.tools.activation_function import get_activation_fn
+from models.tools.layer import grayscale_to_rainbow, logits2predict, logits2softmax, get_num_channels, conv_bn_relu_drop, \
     down_conv_bn_relu, up_conv_bn_relu, concat_conv_bn_relu_drop, convolution
-from models.loss_function import get_loss_op
-from models.metrics_function import get_metrics
+from models.tools.loss_function import get_loss_op
+from models.tools.metrics_function import get_metrics
 
 net_configs = {
     'encoder_1': {'conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 1, 'resnet': True},

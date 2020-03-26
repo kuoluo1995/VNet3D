@@ -9,21 +9,21 @@ from models.vnet3d import Vnet3dModule
 
 tf.logging.set_verbosity(tf.logging.ERROR)
 
-batch_size = 2
-depth = 16
-height = 256
-width = 256
+batch_size = 2  # Size of batch
+depth = 16  # Number of layers in data patch
+height = 256 # Size of a data patch
+width = 256 # Size of a data patch
 input_channels = ['volume']
 label_channels = ['segmentation']
 
 init_filter = 16
 classes = [0, 1]
-model_dir = Path('temp/checkpoints')
-logs_path = Path('temp/tensorboard_logs') / 'vnet'
+model_dir = Path('temp/checkpoints')  # Directory where to write checkpoint
+logs_path = Path('temp/tensorboard_logs') / 'vnet' # Directory where to write training and testing event logs
 
-learning_rate = 1e-2
-decay_factor = 0.99
-decay_steps = 100
+learning_rate = 1e-2 # Initial learning rate
+decay_factor = 0.99 # Exponential decay learning rate factor
+decay_steps = 1000 # Number of epoch before applying one learning rate decay
 
 drop = 0.3
 num_epoch = 99999
