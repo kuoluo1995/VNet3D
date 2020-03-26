@@ -1,32 +1,9 @@
+import matplotlib.pyplot as plt  # plt 用于显示图片
 import nibabel as nib
 import numpy as np
-import tensorflow as tf
 from pathlib import Path
 
-from dataset import NiftiDataset3D
-
-
-def get_nii_list(_path):
-    dataset = {}
-    nii_path = Path(_path)
-    for _iter in nii_path.iterdir():
-        name = _iter.name
-        _type, _key = name.split('-')
-        if _key not in dataset.keys():
-            dataset[_key] = {}
-        dataset[_key][_type] = str(_iter)
-    return dataset
-
-
-def get_nii2_list(_path):
-    dataset = {}
-    nii_path = Path(_path)
-    for _iter in nii_path.iterdir():
-        name = _iter.name
-        dataset[name] = {}
-        dataset[name]['volume'] = str(_iter / 'stir.nii')
-        dataset[name]['segmentation'] = str(_iter / 'label.nii')
-    return dataset
+from dataset.nf_tf_dataloader import get_nii2_list
 
 
 def _get_data_patch(x, y, depth, height, width, channels, is_random):
@@ -151,30 +128,27 @@ def get_patch_list(x, y, len_depth, len_height, len_width, image_depth, image_he
     return patch_xs, patch_ys
 
 
-def nift_generator(data_list, spacing, batch_size, height, width, depth, input_channels, label_channels, classes,
-                   is_train=True, drop_ratio=0.01, min_pixel=30):
-    with tf.device('/cpu:0'):
-        with tf.name_scope('{}_pipeline'.format('train' if is_train else 'test')):
-            if is_train:
-                data_transforms = [
-                    NiftiDataset3D.ManualNormalization(0, 900),
-                    NiftiDataset3D.RandomFlip((True, True, True)),
-                    NiftiDataset3D.Resample(spacing),
-                    NiftiDataset3D.Padding((height, width, depth)),
-                    NiftiDataset3D.RandomCrop((height, width, depth), is_train, drop_ratio, min_pixel),
-                    NiftiDataset3D.RandomNoise()
-                ]
-            else:
-                data_transforms = [
-                    NiftiDataset3D.ManualNormalization(0, 900),
-                    NiftiDataset3D.Resample(spacing),
-                    NiftiDataset3D.Padding((height, width, depth)),
-                    NiftiDataset3D.RandomCrop((height, width, depth), is_train, drop_ratio, min_pixel),
-                ]
-            Dataset = NiftiDataset3D.NiftiDataset(data_list, input_channels, label_channels, classes, data_transforms,
-                                                  is_train)
-            dataset = Dataset.get_dataset()
-            dataset = dataset.shuffle(buffer_size=4)
-            dataset = dataset.batch(batch_size, drop_remainder=True)
-            iterator = dataset.make_initializable_iterator()
-    return iterator
+def show_test_generator(depth):
+    for i in range(1):
+        value = np.load('./test_generator/{}.npz'.format(i))
+        batch_xs, batch_ys = value['batch_xs'], value['batch_ys']
+        for _d in range(depth):
+            plt.axis('off')  # 不显示坐标轴
+            plt.imshow(batch_xs[1, :, :, _d, 0], cmap='gray')  # 显示图片
+            plt.show()
+            plt.imshow(batch_ys[1, :, :, _d, 0], cmap='gray')  # 显示图片
+            plt.axis('off')  # 不显示坐标轴
+            plt.show()
+        print(11)
+
+
+if __name__ == '__main__':
+    dataset = get_nii2_list('E:/Dataset/Neurofibromatosis/source/test')
+    dataset = list(dataset.values())
+    train_dataset_size = len(dataset) * 9 // 10
+    train_dataset = dataset  # dataset[:train_dataset_size]
+    eval_dataset = dataset[train_dataset_size:]
+    train_generator = generator(train_dataset, batch_size=1, depth=16, height=256, width=256,
+                                channels=1, is_random=True)  # , transpose=(1, 2, 0)
+    eval_generator = generator(eval_dataset, batch_size=1, depth=16, height=256, width=256,
+                               channels=1, is_random=False)  # , transpose=(1, 2, 0)

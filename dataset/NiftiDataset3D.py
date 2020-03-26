@@ -1,6 +1,6 @@
-import random
 import math
 import multiprocessing
+import random
 import numpy as np
 import SimpleITK as sitk
 import tensorflow as tf
@@ -12,16 +12,17 @@ class NiftiDataset:
         self.data_list = data_list
         self.input_channels = input_channels
         self.label_channels = label_channels[0]
+        self.classes = classes
         self.transforms = transforms
         self.is_train = is_train
-        self.classes = classes
 
     def get_dataset(self):
-        dataset = tf.data.Dataset.from_tensor_slices(np.arange(0, len(self.data_list)))
+        self.data_size = len(self.data_list)
+        case_list = np.arange(0, self.data_size)
+        dataset = tf.data.Dataset.from_tensor_slices(case_list)
         dataset = dataset.map(lambda case: tuple(tf.py_func(self.input_parser, [case], [tf.float32, tf.int32])),
                               num_parallel_calls=multiprocessing.cpu_count())
         self.dataset = dataset
-        self.data_size = len(self.data_list)
         return self.dataset
 
     def read_image(self, path):
@@ -29,8 +30,8 @@ class NiftiDataset:
         reader.SetFileName(path)
         return reader.Execute()
 
-    def input_parser(self, case):
-        case = self.data_list[case]
+    def input_parser(self, case_index):
+        case = self.data_list[case_index]
         image_paths = []
         for channel in self.input_channels:
             image_paths.append(case[channel])
@@ -58,7 +59,6 @@ class NiftiDataset:
 
         if self.is_train:
             label_ = self.read_image(case[self.label_channels])
-
             # check header same
             same_size = label_.GetSize() == images[0].GetSize()
             same_spacing = label_.GetSpacing() == images[0].GetSpacing()
@@ -86,7 +86,7 @@ class NiftiDataset:
                 addFilter = sitk.AddImageFilter()
                 label = addFilter.Execute(label, one_hot_label_image)
 
-        sample = {'image': images, 'label': label}  # 1000,20, 320
+        sample = {'image': images, 'label': label}
         if self.transforms:
             for transform in self.transforms:
                 try:
@@ -111,33 +111,21 @@ class NiftiDataset:
         # to unify matrix dimension order between SimpleITK([x,y,z]) and numpy([z,y,x])
         label_np = np.transpose(label_np, (1, 2, 0))
         label_np = label_np[:, :, :, np.newaxis]
-        _image_max = np.max(image_np)
-        _image_min = np.min(image_np)
-        image_np = (image_np - _image_min) / (_image_max - _image_min)
-        return image_np, label_np
+        return image_np / 255, label_np
 
 
-class RandomFlip(object):
-    def __init__(self, axes):
-        self.name = 'Flip'
-        assert len(axes) > 0 and len(axes) <= 3
-        self.axes = axes
+class Normalization:
+    def __init__(self, min_output, max_output):
+        self.name = 'Normalization'
+        self.min_output = float(min_output)
+        self.max_output = float(max_output)
 
     def __call__(self, sample):
+        resacleFilter = sitk.RescaleIntensityImageFilter()
+        resacleFilter.SetOutputMinimum(self.min_output)
+        resacleFilter.SetOutputMaximum(self.max_output)
         image, label = sample['image'], sample['label']
-        _axes = np.where(np.random.random(3) > 0.5, True, False)
-        axes = list()
-        for i, _a in enumerate(self.axes):
-            if _a and _axes[i]:
-                axes.append(True)
-            else:
-                axes.append(False)
-        flipFilter = sitk.FlipImageFilter()
-        for image_channel in range(len(image)):
-            flipFilter.SetFlipAxes(axes)
-            image[image_channel] = flipFilter.Execute(image[image_channel])
-        flipFilter.SetFlipAxes(axes)
-        label = flipFilter.Execute(label)
+        image = resacleFilter.Execute(image)
 
         return {'image': image, 'label': label}
 
@@ -157,6 +145,46 @@ class ManualNormalization:
         intersity_window_filter.SetWindowMaximum(self.max_window)
         for _c in range(len(image)):
             image[_c] = intersity_window_filter.Execute(image[_c])
+        return {'image': image, 'label': label}
+
+
+class Reorient:
+    def __init__(self, order):
+        self.name = 'Reoreient'
+        assert isinstance(order, (int, tuple))
+        assert len(order) == 3
+        self.order = order
+
+    def __call__(self, sample):
+        reorientFilter = sitk.PermuteAxesImageFilter()
+        reorientFilter.SetOrder(self.order)
+        image = reorientFilter.Execute(sample['image'])
+        label = reorientFilter.Execute(sample['label'])
+
+        return {'image': image, 'label': label}
+
+
+class RandomFlip(object):
+    def __init__(self, axes):
+        self.name = 'Flip'
+        assert len(axes) > 0 and len(axes) <= 3
+        self.axes = axes
+
+    def __call__(self, sample):
+        image, label = sample['image'], sample['label']
+        _axes = np.where(np.random.random(3) > 0.5, True, False)
+        axes = list()
+        for i, _a in enumerate(self.axes):
+            if _a and _axes[i]:
+                axes.append(True)
+            else:
+                axes.append(False)
+        flipFilter = sitk.FlipImageFilter()
+        flipFilter.SetFlipAxes(axes)
+        for image_channel in range(len(image)):
+            image[image_channel] = flipFilter.Execute(image[image_channel])
+        label = flipFilter.Execute(label)
+
         return {'image': image, 'label': label}
 
 
@@ -217,7 +245,6 @@ class Padding:
                 output_size[1] = size_old[1]
             if size_old[2] > self.output_size[2]:
                 output_size[2] = size_old[2]
-
             output_size = tuple(output_size)
 
             for _c in range(len(image)):
@@ -234,7 +261,6 @@ class Padding:
             resampler.SetInterpolator(sitk.sitkNearestNeighbor)
             resampler.SetOutputOrigin(label.GetOrigin())
             resampler.SetOutputDirection(label.GetDirection())
-
             label = resampler.Execute(label)
 
             return {'image': image, 'label': label}
@@ -243,8 +269,8 @@ class Padding:
 class RandomCrop:
     def __init__(self, output_size, is_train, drop_ratio=0.1, min_pixel=1):
         self.name = 'Random Crop'
-        self.is_train = is_train
         self.output_size = output_size
+        self.is_train = is_train
         self.drop_ratio = drop_ratio
         self.min_pixel = min_pixel
 
