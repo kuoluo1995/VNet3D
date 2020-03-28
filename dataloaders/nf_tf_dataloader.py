@@ -35,7 +35,7 @@ def nift_generator(data_list, data_transforms, batch_size, input_channels, label
             Dataset = NiftiDataset3D.NiftiDataset(data_list, input_channels, label_channels, classes, data_transforms,
                                                   is_train)
             dataset = Dataset.get_dataset()
-            dataset = dataset.shuffle(buffer_size=3)
+            dataset = dataset.shuffle(buffer_size=4)
             dataset = dataset.batch(batch_size, drop_remainder=True)
             iterator = dataset.make_initializable_iterator()
     return iterator

@@ -1,18 +1,17 @@
-import sys
-
 import tensorflow as tf
 
 
-def get_activation_fn(name):
-    if name == 'relu':
-        activation_fn = tf.nn.relu
-    elif name == 'prelu':
-        activation_fn = prelu
-    elif name == 'lrelu':
-        activation_fn = tf.nn.leaky_relu
+def get_activation_fn(x, activation_type):
+    if activation_type is None:
+        return x
+    elif activation_type == 'prelu':
+        return prelu(x)
+    elif activation_type == 'lrelu':
+        return tf.nn.leaky_relu(x)
+    elif activation_type == 'relu':
+        return tf.nn.relu(x)
     else:
-        sys.exit("Invalid activation function")
-    return activation_fn
+        raise Exception("Invalid activation function")
 
 
 # parametric leaky relu

@@ -1,4 +1,3 @@
-import sys
 import numpy as np
 import tensorflow as tf
 
@@ -8,9 +7,26 @@ from models.tools.layer import get_spatial_rank
 def get_loss_op(loss_name, logits_, softmax_, labels, num_classes, **kwargs):
     with tf.name_scope('loss'):
         _axis = np.arange(1, get_spatial_rank(labels) + 1)
-        labels = tf.cast(tf.one_hot(labels[..., 0], depth=num_classes), dtype=tf.float32)
+        # labels = tf.cast(tf.one_hot(labels[..., 0], depth=num_classes), dtype=tf.float32)
         if loss_name == "xent":
-            loss_op = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=logits_))
+            loss_op = tf.reduce_mean(
+                tf.nn.softmax_cross_entropy_with_logits(labels=tf.squeeze(labels, squeeze_dims=[len(_axis) + 1]),
+                                                        logits=logits_))
+        elif loss_name == 'weighted_corss_entropy':
+            class_weights = tf.constant([1.0, 1.0])
+            # deduce weights for batch samples based on their true label
+            one_hot_labels = tf.one_hot(tf.squeeze(labels, squeeze_dims=[len(_axis) + 1]), depth=num_classes)
+
+            weights = tf.reduce_sum(class_weights * one_hot_labels, axis=-1)
+            # compute your (unweighted) softmax cross entropy loss
+            logits_masked = logits_
+            unweighted_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits_masked,
+                                                                             labels=tf.squeeze(labels, squeeze_dims=[
+                                                                                 len(_axis) + 1]))
+            # apply the weights, relying on broadcasting of the multiplication
+            weighted_loss = unweighted_loss * weights
+            # reduce the result to get your final loss
+            loss_op = tf.reduce_mean(weighted_loss)
         elif loss_name == "sorensen":
             sorensen = dice_coe(softmax_, tf.cast(labels, dtype=tf.float32), loss_type='sorensen', axis=_axis)
             loss_op = 1. - sorensen
@@ -44,7 +60,7 @@ def get_loss_op(loss_name, logits_, softmax_, labels, num_classes, **kwargs):
                                weighted=True)
             loss_op = (1. - jaccard) + xent
         else:
-            sys.exit("Invalid loss function")
+            raise Exception("Invalid loss function")
         return loss_op
 
 

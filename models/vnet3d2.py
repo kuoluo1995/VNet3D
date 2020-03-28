@@ -9,33 +9,33 @@ from models.tools.metrics_function import get_metrics
 from models.tools.normalization_function import get_normalization_fn
 
 net_configs = {
-    'encoder_1': {'conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 1, 'resnet': True},
-                  'down_block': {'kernel': [2, 2, 2], 'strides': [2, 2, 2]}},
-    'encoder_2': {'conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 2, 'resnet': True},
-                  'down_block': {'kernel': [2, 2, 2], 'strides': [2, 2, 2]}},
-    'encoder_3': {'conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 3, 'resnet': True},
-                  'down_block': {'kernel': [2, 2, 2], 'strides': [2, 2, 2]}},
-    'encoder_4': {'conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 3, 'resnet': True},
-                  'down_block': {'kernel': [2, 2, 2], 'strides': [2, 2, 2]}},
-    'bottom': {'conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 3, 'resnet': True}},
-    'decoder_4': {'up_block': {'kernel': [2, 2, 2], 'strides': [1, 2, 2, 2, 1]},
-                  'concat_conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 3, 'resnet': True,
+    'encoder_1': {'conv_block': {'kernel': [3, 3, 3], 'strides': None, 'replace': 1, 'resnet': True},
+                  'down_block': {'kernel': [3, 3, 3], 'strides': [2, 2, 2]}},
+    'encoder_2': {'conv_block': {'kernel': [3, 3, 3], 'strides': None, 'replace': 2, 'resnet': True},
+                  'down_block': {'kernel': [3, 3, 3], 'strides': [2, 2, 2]}},
+    'encoder_3': {'conv_block': {'kernel': [3, 3, 3], 'strides': None, 'replace': 3, 'resnet': True},
+                  'down_block': {'kernel': [3, 3, 3], 'strides': [2, 2, 2]}},
+    'encoder_4': {'conv_block': {'kernel': [3, 3, 3], 'strides': None, 'replace': 3, 'resnet': True},
+                  'down_block': {'kernel': [3, 3, 3], 'strides': [2, 2, 2]}},
+    'bottom': {'conv_block': {'kernel': [3, 3, 3], 'strides': None, 'replace': 3, 'resnet': True}},
+    'decoder_4': {'up_block': {'kernel': [3, 3, 3], 'strides': [1, 2, 2, 2, 1]},
+                  'concat_conv_block': {'kernel': [3, 3, 3], 'strides': None, 'replace': 3, 'resnet': True,
                                         'feature': 'encoder_4'}},
-    'decoder_3': {'up_block': {'kernel': [2, 2, 2], 'strides': [1, 2, 2, 2, 1]},
-                  'concat_conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 3, 'resnet': True,
+    'decoder_3': {'up_block': {'kernel': [3, 3, 3], 'strides': [1, 2, 2, 2, 1]},
+                  'concat_conv_block': {'kernel': [3, 3, 3], 'strides': None, 'replace': 3, 'resnet': True,
                                         'feature': 'encoder_3'}},
-    'decoder_2': {'up_block': {'kernel': [2, 2, 2], 'strides': [1, 2, 2, 2, 1]},
-                  'concat_conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 2, 'resnet': True,
+    'decoder_2': {'up_block': {'kernel': [3, 3, 3], 'strides': [1, 2, 2, 2, 1]},
+                  'concat_conv_block': {'kernel': [3, 3, 3], 'strides': None, 'replace': 3, 'resnet': True,
                                         'feature': 'encoder_2'}},
-    'decoder_1': {'up_block': {'kernel': [2, 2, 2], 'strides': [1, 2, 2, 2, 1]},
-                  'concat_conv_block': {'kernel': [5, 5, 5], 'strides': None, 'replace': 1, 'resnet': True,
+    'decoder_1': {'up_block': {'kernel': [3, 3, 3], 'strides': [1, 2, 2, 2, 1]},
+                  'concat_conv_block': {'kernel': [3, 3, 3], 'strides': None, 'replace': 3, 'resnet': True,
                                         'feature': 'encoder_1'}}
 }
 
 
 class Vnet3dModule:
     def __init__(self, batch_size, depth, height, width, channels, init_filter, num_classes, keep_prob=0,
-                 norm_type='batch', activation_type='prelu', loss_name="sorensen"):
+                 norm_type='group', activation_type='relu', loss_name="sorensen"):
         self.batch_size = batch_size
         self.depth = depth
         self.height = height
@@ -57,8 +57,10 @@ class Vnet3dModule:
     def _build_network(self):
         with tf.variable_scope('vnet'):
             with tf.variable_scope('input_layer'):
-                x = tf.tile(self.image_ph, [1, 1, 1, 1, self.init_filter])
-                x = get_normalization_fn(x, self.norm_type, self.is_train)
+                filter_ = [3, 3, 3, self.channels, self.init_filter]
+                x = conv_bn_relu_drop(self.image_ph, filter_, None, self.activation_type, self.norm_type, self.is_train,
+                                      self.keep_prob, 1, None)
+
             features = {}
             for level_name, items in net_configs.items():
                 with tf.variable_scope(level_name):
